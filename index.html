@@ -1,0 +1,467 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+	<title>TPMS Viewer</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+	<meta name="description" content="Explore and visualize triply periodic minimal surfaces (TPMS) with this interactive online viewer.">
+	<meta name="keywords" content="TPMS, Triply Periodic Minimal Surfaces, minimal surfaces, mathematical visualization, 3D viewer, online viewer">
+	<style>
+		body {
+		  color: #fff;
+		  font-family: Monospace;
+		  font-size: 13px;
+		  text-align: center;
+
+		  background-color: #000;
+		  margin: 0px;
+		  overflow: hidden;
+		}
+
+		#info {
+		  color: #ffffff;
+		  position: absolute;
+		  top: 0px;
+		  width: 100%;
+		  padding: 5px;
+		}
+
+		a {
+		  color: gold;
+		}
+
+		#oldie {
+		  font-family: monospace;
+		  font-size: 13px;
+
+		  text-align: center;
+		  background: rgb(0, 0, 50);
+		  color: #fff;
+		  padding: 1em;
+
+		  width: 475px;
+		  margin: 5em auto 0;
+
+		  display: none;
+		}
+
+	</style>
+</head>
+
+<body>
+
+	<div id="container"></div>
+
+	<script type="importmap">
+		{
+			"imports": {
+			  "three": "https://cdn.jsdelivr.net/npm/three@0.167.1/build/three.module.js",
+			  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.167.1/examples/jsm/"
+			}
+		  }
+	</script>
+
+	<script type="module">
+		import * as THREE from 'three';
+
+		import Stats from 'three/addons/libs/stats.module.js';
+
+		import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+		import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+		import { MarchingCubes } from './MarchingCubes.js';
+		import { ToonShader1, ToonShader2, ToonShaderHatching, ToonShaderDotted } from 'three/addons/shaders/ToonShader.js';
+		import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
+
+		let container, stats;
+
+		let camera, scene, renderer;
+
+		let materials, current_material;
+
+		let light, light2, light3, light4, pointLight, ambientLight;
+
+		let effect, resolution;
+
+		let effectController;
+
+		let time = 0;
+
+		let toUpdate = true;
+
+		const clock = new THREE.Clock();
+
+		let surface_functions, current_surface_function;
+
+		init();
+
+		function downloadStringAsFile(filename, text) {
+			// Create a Blob from the string
+			const blob = new Blob([text], { type: 'text/plain' });
+			
+			// Create an anchor element and set the URL to the Blob object
+			const link = document.createElement('a');
+			link.href = URL.createObjectURL(blob);
+			link.download = filename;
+			
+			// Programmatically click the link to trigger the download
+			document.body.appendChild(link);
+			link.click();
+			
+			// Clean up by removing the link
+			document.body.removeChild(link);
+		}
+
+		function init() {
+
+			container = document.getElementById( 'container' );
+
+			// CAMERA
+
+			camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 10000 );
+			camera.position.set( - 1500, 1500, 1500 );
+
+			// SCENE
+
+			scene = new THREE.Scene();
+			scene.background = new THREE.Color( 0x050505 );
+
+			// LIGHTS
+
+			light = new THREE.DirectionalLight( 0xffffff, 3 );
+			light.position.set( 0.5, 1, 0.5 );
+			scene.add( light );
+
+			light2 = new THREE.DirectionalLight( 0xffffff, 3 );
+			light2.position.set( -0.5, 1, 0.5 );
+			scene.add( light2 );
+
+			light3 = new THREE.DirectionalLight( 0xffffff, 3 );
+			light3.position.set( 0.5, 1, -0.5 );
+			scene.add( light3 );
+
+			light4 = new THREE.DirectionalLight( 0xffffff, 3 );
+			light4.position.set( -0.5, 1, -0.5 );
+			scene.add( light4 );
+
+			pointLight = new THREE.PointLight( 0xff7c00, 3, 0, 0 );
+			pointLight.position.set( 0, 0, 100 );
+			scene.add( pointLight );
+
+			ambientLight = new THREE.AmbientLight( 0x323232, 3 );
+			scene.add( ambientLight );
+
+			// MATERIALS
+
+			materials = generateMaterials();
+			current_material = 'textured';
+
+			// SURFACE FUNCTIONS
+
+			surface_functions = generateSurfaceEquations();
+			current_surface_function = 'Schwarz P';
+
+			// MARCHING CUBES
+
+			resolution = 28;
+
+			effect = new MarchingCubes( resolution, materials[ current_material ], true, true, 1000000 );
+			effect.position.set( 0, 0, 0 );
+			effect.scale.set( 700, 700, 700 );
+
+			effect.enableColors = false;
+
+			scene.add( effect );
+
+			// RENDERER
+
+			renderer = new THREE.WebGLRenderer();
+			renderer.setPixelRatio( window.devicePixelRatio );
+			renderer.setSize( window.innerWidth, window.innerHeight );
+			renderer.setAnimationLoop( animate );
+			container.appendChild( renderer.domElement );
+
+			// CONTROLS
+
+			const controls = new OrbitControls( camera, renderer.domElement );
+			controls.minDistance = 500;
+			controls.maxDistance = 5000;
+
+			// STATS
+
+			stats = new Stats();
+			container.appendChild( stats.dom );
+
+			// GUI
+
+			setupGui();
+
+			// EVENTS
+
+			window.addEventListener( 'resize', onWindowResize );
+
+		}
+
+		//
+
+		function onWindowResize() {
+
+			camera.aspect = window.innerWidth / window.innerHeight;
+			camera.updateProjectionMatrix();
+
+			renderer.setSize( window.innerWidth, window.innerHeight );
+
+		}
+
+		function generateMaterials() {
+
+			// environment map
+
+			const path = 'https://threejs.org/examples/textures/cube/SwedishRoyalCastle/';
+			const format = '.jpg';
+			const urls = [
+				path + 'px' + format, path + 'nx' + format,
+				path + 'py' + format, path + 'ny' + format,
+				path + 'pz' + format, path + 'nz' + format
+			];
+
+			const cubeTextureLoader = new THREE.CubeTextureLoader();
+
+			const reflectionCube = cubeTextureLoader.load( urls );
+			const refractionCube = cubeTextureLoader.load( urls );
+			refractionCube.mapping = THREE.CubeRefractionMapping;
+
+			// toons
+			function createShaderMaterial( shader, light, ambientLight ) {
+
+				const u = THREE.UniformsUtils.clone( shader.uniforms );
+
+				const vs = shader.vertexShader;
+				const fs = shader.fragmentShader;
+
+				const material = new THREE.ShaderMaterial( { uniforms: u, vertexShader: vs, fragmentShader: fs } );
+
+				material.uniforms[ 'uDirLightPos' ].value = light.position;
+				material.uniforms[ 'uDirLightColor' ].value = light.color;
+
+				material.uniforms[ 'uAmbientLightColor' ].value = ambientLight.color;
+
+				return material;
+
+				}
+
+			const toonMaterial1 = createShaderMaterial( ToonShader1, light, ambientLight );
+			const toonMaterial2 = createShaderMaterial( ToonShader2, light, ambientLight );
+			const hatchingMaterial = createShaderMaterial( ToonShaderHatching, light, ambientLight );
+			const dottedMaterial = createShaderMaterial( ToonShaderDotted, light, ambientLight );
+
+			const texture = new THREE.TextureLoader().load( 'https://threejs.org/examples/textures/uv_grid_opengl.jpg' );
+			texture.wrapS = THREE.RepeatWrapping;
+			texture.wrapT = THREE.RepeatWrapping;
+			texture.colorSpace = THREE.SRGBColorSpace;
+
+			const materials = {
+				'shiny': new THREE.MeshStandardMaterial( { color: 0x9c0000, envMap: reflectionCube, roughness: 0.1, metalness: 1.0 } ),
+				'chrome': new THREE.MeshLambertMaterial( { color: 0xffffff, envMap: reflectionCube } ),
+				'liquid': new THREE.MeshLambertMaterial( { color: 0xffffff, envMap: refractionCube, refractionRatio: 0.90 } ),
+				'matte': new THREE.MeshPhongMaterial( { specular: 0x494949, shininess: 1 } ),
+				'flat': new THREE.MeshLambertMaterial( { flatShading: true } ),
+				'textured': new THREE.MeshPhongMaterial( { color: 0xffffff, specular: 0x111111, shininess: 1, map: texture } ),
+				'plastic': new THREE.MeshPhongMaterial( { specular: 0xc1c1c1, shininess: 250 } ),
+				'toon1': toonMaterial1,
+				'toon2': toonMaterial2,
+				'hatching': hatchingMaterial,
+				'dotted': dottedMaterial
+			};
+
+			return materials;
+
+		}
+
+		//
+
+		function setupGui() {
+
+			const createHandler = function ( id ) {
+
+				return function () {
+
+					current_material = id;
+
+					effect.material = materials[ id ];
+					effect.enableUvs = ( current_material === 'textured' ) ? true : false;
+					effect.enableColors = ( current_material === 'colors' || current_material === 'multiColors' ) ? true : false;
+					toUpdate = true;
+				};
+
+			};
+
+			const createSurfaceHandler = function ( id ) {
+
+				return function () {
+
+					current_surface_function = id;
+					toUpdate = true;
+
+				};
+
+			};
+
+			effectController = {
+
+				material: 'shiny',
+
+
+				resolution: 100,
+				isolation: 1000,
+
+
+
+				thickness:0.5,
+
+				'x offset': 0.5,
+				'y offset': 0.5,
+				'z offset': 0.5,
+
+				'scale': 0.06,
+
+				'save to obj': function () {
+					const mc =  new MarchingCubes( resolution, materials[ current_material ], true, true, 1000000 );
+					updateCubes( mc, time);
+					const exporter = new OBJExporter();
+					const data = exporter.parse( mc );
+					downloadStringAsFile('tpms.obj', data);
+				},
+
+				dummy: function () {}
+
+			};
+
+			let h;
+
+			const gui = new GUI();
+
+			// material (type)
+
+			h = gui.addFolder( 'Materials' );
+
+			for ( const m in materials ) {
+
+				effectController[ m ] = createHandler( m );
+				h.add( effectController, m ).name( m );
+
+			}
+
+			// surface (type)
+
+			h = gui.addFolder( 'Type' );
+
+			for ( const s in surface_functions ) {
+
+				effectController[ s ] = createSurfaceHandler( s );
+				h.add( effectController, s ).name( s );
+
+			}
+
+			// simulation
+
+			h = gui.addFolder( 'Lattice' );
+
+
+			
+
+			h.add( effectController, 'thickness', 0.2, 5, 0.001);
+
+			h.add( effectController, 'x offset', 0, 1, 0.01 );
+			h.add( effectController, 'y offset', 0, 1, 0.01 );
+			h.add( effectController, 'z offset', 0, 1, 0.01 );
+
+			h.add( effectController, 'scale', 0.03, 0.3, 0.001 );
+
+			h = gui.addFolder( 'Marching Cube' );
+
+			h.add( effectController, 'resolution', 30, 120, 1 );
+			h.add( effectController, 'isolation', 1, 1000, 1 );
+
+			h.add( effectController, 'save to obj' );
+
+			h = gui.onChange( event => {
+				toUpdate = true;
+			} );
+
+		}
+
+		// this controls content of marching cubes voxel field
+
+		function generateSurfaceEquations(){
+			
+			let functions = {"Schwarz P": (x,y,z,thickness) => thickness-Math.abs(Math.cos(x)+Math.cos(y)+Math.cos(z)),
+						 "Gyroid": (x,y,z,thickness) => thickness-Math.abs(Math.sin(x)*Math.cos(y) + Math.sin(y)*Math.cos(z) + Math.sin(z)*Math.cos(x)),
+						 "Nevious": (x,y,z,thickness) => thickness-Math.abs(3*(Math.cos(x)+Math.cos(y)+Math.cos(z)) + 4*(Math.cos(x)*Math.cos(y)*Math.cos(z))),
+						 "Lidinoid": (x,y,z,thickness) => thickness-Math.abs(0.5*(Math.sin(2*x)*Math.cos(y)*Math.sin(z)+Math.sin(2*y)*Math.cos(z)*Math.sin(x) + Math.sin(2*z)*Math.cos(x)*Math.sin(y))
+						 								- 0.5 * (Math.cos(2*x)*Math.cos(2*y) + Math.cos(2*y)*Math.cos(2*z) + Math.cos(2*z)*Math.cos(2*x))
+														+ 0.15),
+						 "PW Hybrid": (x,y,z,thickness) => thickness-Math.abs(2*(Math.cos(x)*Math.cos(y)+Math.cos(y)*Math.cos(z)+Math.cos(z)*Math.cos(x)) - 4*(Math.cos(x)*Math.cos(y)*Math.cos(z)) + 0.24),
+						 "Diamond": (x,y,z,thickness) => thickness-Math.abs(Math.sin(x)*Math.sin(y)*Math.sin(z)+Math.sin(x)*Math.cos(y)*Math.cos(z)+Math.cos(x)*Math.sin(y)*Math.cos(z)+Math.cos(x)*Math.cos(y)*Math.sin(z)),
+						 "Split P": (x,y,z,thickness) => thickness-Math.abs(1.1*(Math.sin(2*x)*Math.sin(z)*Math.cos(y)+Math.sin(2*y)*Math.sin(x)*Math.cos(z)+Math.sin(2*z)*Math.sin(y)*Math.cos(x))-0.2*(Math.cos(2*x)*Math.cos(2*y)+Math.cos(2*y)*Math.cos(2*z)+Math.cos(2*z)*Math.cos(2*x))-0.4*(Math.cos(2*x) + Math.cos(2*y) + Math.cos(2*z))),
+						}		
+			return functions;
+
+		}
+
+		function updateCubes( object, time) {
+
+			object.reset();
+			let thickness = effectController.thickness;
+			let move_x = effectController['x offset'];
+			let move_y = effectController['y offset'];
+			let move_z = effectController['z offset'];
+			let scale = effectController.scale;
+			object.addEquation(surface_functions[current_surface_function], move_x, move_y, move_z, scale, thickness);
+			object.update();
+
+		}
+
+		//
+
+		function animate() {
+
+			render();
+			stats.update();
+
+		}
+
+		function render() {
+
+			const delta = clock.getDelta();
+
+			time += delta * effectController.speed * 0.5;
+
+			// marching cubes
+
+			if ( effectController.resolution !== resolution ) {
+
+				resolution = effectController.resolution;
+				effect.init( Math.floor( resolution ) );
+
+			}
+
+			if ( effectController.isolation !== effect.isolation ) {
+
+				effect.isolation = effectController.isolation;
+
+			}
+			if(toUpdate){
+				updateCubes( effect, time);
+				toUpdate = false;
+			}
+
+			// render
+
+			renderer.render( scene, camera );
+
+		}
+
+</script>
+
+</body>
+</html>
